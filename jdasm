@@ -1,0 +1,28 @@
+#!/usr/bin/env python
+
+"""
+jdasm: Java disassembler (prototype)
+
+Usage:
+    jdasm [-d] [-r] [-l <logfile>] [-o <fname>] [<classfile> ...]
+
+Options:
+    -h  --help         Show this screen.
+    --version          Show version.
+    -r                 Roundtrip format.
+    -o <fname>         Set output filename.
+    -d                 Print debug info to log file.
+    -l <logfile>       Set logfilename [default: LOG.txt]
+"""
+
+import docopt  # type:ignore
+
+VERSION = '0.0.1'
+
+def main() -> None:
+    args = docopt.docopt(__doc__, version=VERSION)
+    print(args)
+
+
+if __name__ == '__main__':
+    main()
