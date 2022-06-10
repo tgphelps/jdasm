@@ -15,13 +15,44 @@ Options:
     -l <logfile>       Set logfilename [default: LOG.txt]
 """
 
+import os
 import docopt  # type:ignore
 
+from Globals import g
+from log import Log
+import util
+
 VERSION = '0.0.1'
+MAX_CLASSFILE_SIZE = 50_000  # Refuse to do anything bigger.
+
 
 def main() -> None:
-    args = docopt.docopt(__doc__, version=VERSION)
-    print(args)
+    g.args = docopt.docopt(__doc__, version=VERSION)
+    print(g.args)
+    if g.args['-d']:
+        g.debug = True
+        g.log = Log(g.args['-l'])
+        g.log.log('jdasm version', VERSION)
+    else:
+        g.debug = False
+
+    for f in g.args['<classfile>']:
+        if g.debug:
+            g.log.log('class:', f)
+        do_classfile(f)
+    g.log.close()
+
+
+def do_classfile(fname: str) -> None:
+    if not os.path.isfile(fname):
+        util.fatal(fname, 'is not a file')
+    size = os.stat(fname).st_size
+    if size == 0 or size > MAX_CLASSFILE_SIZE:
+        util.fatal(fname, 'is empty or too big')
+    with open(fname, 'rb') as f:
+        buff = f.read()
+    if g.debug:
+        g.log.log(fname, 'file size =', len(buff))
 
 
 if __name__ == '__main__':
