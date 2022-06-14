@@ -20,6 +20,7 @@ import docopt  # type:ignore
 
 from Globals import g
 from log import Log
+import classfile
 import util
 
 VERSION = '0.0.1'
@@ -40,7 +41,8 @@ def main() -> None:
         if g.debug:
             g.log.log('class:', f)
         do_classfile(f)
-    g.log.close()
+    if g.debug:
+        g.log.close()
 
 
 def do_classfile(fname: str) -> None:
@@ -53,6 +55,19 @@ def do_classfile(fname: str) -> None:
         buff = f.read()
     if g.debug:
         g.log.log(fname, 'file size =', len(buff))
+    if buff[0:4] != bytes([0xca, 0xfe, 0xba, 0xbe]):
+        util.fatal(fname, 'is not a class file')
+
+    cls = classfile.parse(buff)
+    if cls:
+        if g.args['-o']:
+            outfile = g.args['-o']
+        else:
+            outfile = util.gen_output_file_name(fname)
+        print('output:', outfile)
+        classfile.disassemble(cls, outfile)
+    else:
+        util.fatal('unable to parse file', fname)
 
 
 if __name__ == '__main__':
