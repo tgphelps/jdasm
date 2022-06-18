@@ -1,3 +1,3 @@
 #!/bin/sh
 
-find . -name '*.class' | xargs ./jdasm -d
+find classes -name '*.class' | xargs ./jdasm -d

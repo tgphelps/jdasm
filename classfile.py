@@ -4,6 +4,8 @@ from typing import Optional, TextIO
 
 # from Globals import g
 
+# Constant pool object types
+
 CONSTANT_Invalid = 0
 CONSTANT_Utf8 = 1
 CONSTANT_Integer = 3
@@ -24,6 +26,7 @@ CONSTANT_Package = 20
 
 CP_OFFSET = 10  # Offset of constant pool in classfile
 
+# Names of constant pool types, indexed by tag.
 
 cp_names = [
     'Invalid',
@@ -51,6 +54,7 @@ cp_names = [
 
 
 class Cp_info:
+    'Represents one constant pool entry.'
     tag: int
 
     # NOTE: Only a few of these will be populated for a given tag.
@@ -61,6 +65,8 @@ class Cp_info:
     descriptor_index: int
 
     bytes_num: bytes
+    num_int: int
+    num_float: float
 
     length: int
     bytes_utf: bytes
@@ -74,15 +80,14 @@ class Cp_info:
 
 
 class Attribute:
+    "Represents one attribute."
     attribute_name_index: int
     attribute_length: int
     info: bytes
 
-    def __init__(self):
-        pass
-
 
 class Field:
+    "Represents one field."
     access_flags: int
     name_index: int
     descriptor_index: int
@@ -91,6 +96,7 @@ class Field:
 
 
 class Method:
+    "Represents one method."
     access_flags: int
     name_index: int
     descriptor_index: int
@@ -99,6 +105,12 @@ class Method:
 
 
 class Classfile:
+    """Data structure to hold a complete class file.
+
+    A Classfile object is built by running the various parse* methods,
+    in the proper order. The 'data' field holds the entire raw contents
+    of the class file.
+    """
     data: bytes
     magic: int
     minor_version: int
@@ -117,33 +129,34 @@ class Classfile:
     attributes_count: int
     attributes: list[Attribute]
 
-    offset: int  # used only while parsing
+    # offset: int  # Used only while parsing. Keeps track of 'where we are'.
 
     def __init__(self, buff):
         self.data = buff
 
-    def parse(self):
-        self.parse_header()
-        self.parse_constant_pool()
-        self.parse_middle()
-        self.parse_fields()
-        self.parse_methods()
-        self.parse_attributes()
+    def parse(self) -> None:
+        "Parse the entire contents of the bytes in self.data."
+        offset = self.parse_header(0)
+        offset = self.parse_constant_pool(offset)
+        offset = self.parse_middle(offset)
+        offset = self.parse_fields(offset)
+        offset = self.parse_methods(offset)
+        _ = self.parse_attributes(offset)
 
-    def parse_header(self):
-        a, b, c, d = struct.unpack('>IHHH', self.data[0:10])
+    def parse_header(self, offset: int) -> int:
+        a, b, c, d = struct.unpack('>IHHH', self.data[offset: offset+10])
         assert a == 0xcafebabe
         self.magic = a
         self.minor_version = b
         self.major_version = c
         self.constant_pool_count = d
         # print('cp count:', d)
+        return 10
 
-    def parse_constant_pool(self):
+    def parse_constant_pool(self, offset: int) -> int:
         self.constant_pool = []
         self.constant_pool.append(Cp_info(0))  # dummy entry
         i = 1  # The CP number is one more than the list index.
-        offset = CP_OFFSET
         while i < self.constant_pool_count:
             need_extra_cp_entry = False
             tag = self.data[offset]
@@ -173,9 +186,21 @@ class Classfile:
                 offset += 5
             elif tag in (CONSTANT_Integer, CONSTANT_Float):
                 cp.bytes_num = self.data[offset+1: offset+5]
+                if tag == CONSTANT_Integer:
+                    a = struct.unpack('>i', cp.bytes_num)
+                    cp.num_int = a[0]
+                else:
+                    a = struct.unpack('>f', cp.bytes_num)
+                    cp.num_float = a[0]
                 offset += 5
             elif tag in (CONSTANT_Long, CONSTANT_Double):
                 cp.bytes_num = self.data[offset+1: offset+9]
+                if tag == CONSTANT_Long:
+                    a = struct.unpack('>q', cp.bytes_num)
+                    cp.num_int = a[0]
+                else:
+                    a = struct.unpack('>d', cp.bytes_num)
+                    cp.num_float = a[0]
                 offset += 9
                 i += 1  # Adjust index of next entry
                 need_extra_cp_entry = True
@@ -203,10 +228,9 @@ class Classfile:
                 self.constant_pool.append(cp)
             i += 1
         # print('cpool DONE. length =', len(self.constant_pool))
-        self.offset = offset
+        return offset
 
-    def parse_middle(self):
-        offset = self.offset
+    def parse_middle(self, offset: int) -> int:
         a, b, c, d = struct.unpack('>HHHH', self.data[offset: offset+8])
         self.access_flags = a
         self.this_class = b
@@ -214,75 +238,85 @@ class Classfile:
         self.interfaces_count = d
         # print(a, b, c, d)
         offset += 8
-        if self.interfaces_count > 0:
-            print('interfaces:', self.interfaces_count)
+        # if self.interfaces_count > 0:
+        #     print('interfaces:', self.interfaces_count)
         self.interfaces = []
         for i in range(self.interfaces_count):
             a = struct.unpack(">H", self.data[offset: offset+2])
             self.interfaces.append(a[0])
             offset += 2
-        self.offset = offset
+        return offset
 
-    def parse_fields(self):
-        a = struct.unpack('>H', self.data[self.offset: self.offset+2])
+    def parse_fields(self, offset: int) -> int:
+        a = struct.unpack('>H', self.data[offset: offset+2])
         self.fields_count = a[0]
         self.fields = []
-        self.offset += 2
+        offset += 2
         for i in range(self.fields_count):
             f = Field()
-            a, b, c, d = struct.unpack('>HHHH', self.data[self.offset: self.offset+8])
-            self.offset += 8
-            f.access_flags = a
+            a, b, c, d = struct.unpack('>HHHH', self.data[offset: offset+8])
+            offset += 8
+            f.access_flags = a  # type: ignore[assignment]
             f.name_index = b
             f.descriptor_index = c
             f.attributes_count = d
             f.attribute_info = []
+            # print('# field attrs:', f.attributes_count)
             for j in range(f.attributes_count):
-                f.attribute_info.append(self.parse_one_attribute())
+                # print('field attr:')
+                attr, offset = self.parse_one_attribute(offset)
+                f.attribute_info.append(attr)
             self.fields.append(f)
+        return offset
 
-    def parse_methods(self):
-        a = struct.unpack('>H', self.data[self.offset: self.offset+2])
+    def parse_methods(self, offset: int) -> int:
+        a = struct.unpack('>H', self.data[offset: offset+2])
         self.methods_count = a[0]
         self.methods = []
-        self.offset += 2
+        offset += 2
         for i in range(self.methods_count):
             m = Method()
-            a, b, c, d = struct.unpack('>HHHH', self.data[self.offset: self.offset+8])
-            self.offset += 8
-            m.access_flags = a
+            a, b, c, d = struct.unpack('>HHHH', self.data[offset: offset+8])
+            offset += 8
+            m.access_flags = a  # type: ignore[assignment]
             m.name_index = b
             m.descriptor_index = c
             m.attributes_count = d
             m.attribute_info = []
+            # print('# method attrs:', m.attributes_count)
             for j in range(m.attributes_count):
-                m.attribute_info.append(self.parse_one_attribute())
+                # print('method attr:')
+                attr, offset = self.parse_one_attribute(offset)
+                m.attribute_info.append(attr)
             self.methods.append(m)
+        return offset
 
-    def parse_attributes(self):
-        a = struct.unpack('>H', self.data[self.offset: self.offset+2])
+    def parse_attributes(self, offset: int) -> int:
+        a = struct.unpack('>H', self.data[offset: offset+2])
         self.attributes_count = a[0]
-        self.offset += 2
+        offset += 2
         self.attributes = []
-        for a in range(self.attributes_count):
-            self.attributes.append(self.parse_one_attribute())
+        for a in range(self.attributes_count):  # type: ignore[assignment]
+            attr, offset = self.parse_one_attribute(offset)
+            self.attributes.append(attr)
+        return offset
 
-    def parse_one_attribute(self) -> Attribute:
-        offset = self.offset
+    def parse_one_attribute(self, offset: int) -> tuple[Attribute, int]:
+        # print('parse 1 attr. offset:', offset)
         a, b = struct.unpack('>HI', self.data[offset: offset+6])
         offset += 6
         attr = Attribute()
         attr.attribute_name_index = a
         attr.attribute_length = b
         attr.info = self.data[offset: offset + b]
-        self.offset += 6 + b
-        return attr
+        offset += b
+        return (attr, offset)
 
 
 # ------------------------------------------------
 
 def parse(buff: bytes) -> Optional[Classfile]:
-    # print('parsing...')
+    "Parse the contents of 'buff', and return the Classfile object."
     cls = Classfile(buff)
     cls.parse()
     return cls
@@ -291,7 +325,10 @@ def parse(buff: bytes) -> Optional[Classfile]:
 
 
 def disassemble(cls: Classfile, fname: str) -> None:
-    # print('disassembling into:', fname)
+    """Dissassemble the classfile and write the source code to 'fname'.
+
+    For now, this just writes a crude representation of the contents of cls.
+    """
     with open(fname, 'wt') as f:
         print(f'magic: {cls.magic:#8x}', file=f)
         print(f'major version: {cls.major_version}', file=f)
@@ -327,21 +364,13 @@ def show_constant_pool(cls: Classfile, f: TextIO) -> None:
         elif cp.tag == CONSTANT_NameAndType:
             print(f'{i}: {name} {cp.name_index} {cp.descriptor_index}', file=f)
         elif cp.tag == CONSTANT_Integer:
-            a = struct.unpack('>i', cp.bytes_num)
-            num = a[0]
-            print(f'{i}: {name} {num}', file=f)
+            print(f'{i}: {name} {cp.num_int}', file=f)
         elif cp.tag == CONSTANT_Float:
-            a = struct.unpack('>f', cp.bytes_num)
-            num = a[0]
-            print(f'{i}: {name} {num} raw: {bytes.hex(cp.bytes_num)}', file=f)
+            print(f'{i}: {name} {cp.num_float} raw: {bytes.hex(cp.bytes_num)}', file=f)
         elif cp.tag == CONSTANT_Long:
-            a = struct.unpack('>q', cp.bytes_num)
-            num = a[0]
-            print(f'{i}: {name} {num}', file=f)
+            print(f'{i}: {name} {cp.num_int}', file=f)
         elif cp.tag == CONSTANT_Double:
-            a = struct.unpack('>d', cp.bytes_num)
-            num = a[0]
-            print(f'{i}: {name} {num} raw: {bytes.hex(cp.bytes_num)}', file=f)
+            print(f'{i}: {name} {cp.num_float} raw: {bytes.hex(cp.bytes_num)}', file=f)
         elif cp.tag == CONSTANT_Utf8:
             print(f'{i}: {name} {cp.bytes_utf!r}', file=f)
         elif cp.tag == CONSTANT_MethodHandle:
